@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Chef Slash: Knife Master</title>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none; margin: 0; padding: 0; }
+    html, body { height: 100%; width: 100%; overflow: hidden; }
+    
+    .game-container { 
+      height: 100vh; 
+      width: 100vw; 
+      background: linear-gradient(135deg, #1a472a 0%, #0f2818 100%);
+      position: fixed;
+      top: 0;
+      left: 0;
+      touch-action: none;
+    }
+    
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    
+    .game-ui {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(180deg, rgba(0,0,0,0.9), transparent);
+      font-family: 'Arial Black', sans-serif;
+      color: white;
+    }
+    
+    .score-display, .timer-display, .combo-display {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+    
+    .score-display { background: rgba(255,0,0,0.8); }
+    .combo-display { background: rgba(0,255,0,0.8); }
+    .timer-display { background: rgba(255,165,0,0.8); }
+    
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    
+    .modal-content {
+      text-align: center;
+      background: linear-gradient(135deg, #2d5a3d, #1a472a);
+      border: 3px solid #00ff00;
+      border-radius: 12px;
+      padding: 40px 30px;
+      max-width: 450px;
+      color: white;
+    }
+    
+    .modal-content h1 {
+      font-size: 40px;
+      margin-bottom: 20px;
+      color: #00ff00;
+      text-shadow: 0 0 20px rgba(0,255,0,0.5);
+      font-family: Arial, sans-serif;
+    }
+    
+    .modal-content p {
+      font-size: 18px;
+      margin: 10px 0;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #00ff00, #00cc00);
+      color: #000;
+      border: 2px solid #00ff00;
+      padding: 15px 30px;
+      margin: 10px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+      font-family: Arial, sans-serif;
+    }
+    
+    .btn-primary:active {
+      transform: scale(0.95);
+    }
+  </style>
+  <style>body { box-sizing: border-box; }</style>
+  <script src="https://cdn.tailwindcss.com/3.4.17" type="text/javascript"></script>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+  <script src="/_sdk/element_sdk.js" type="text/javascript"></script>
+ </head>
+ <body>
+  <div class="game-container">
+   <canvas id="gameCanvas"></canvas>
+   <div class="game-ui">
+    <div class="score-display">
+     SCORE: <span id="score">0</span>
+    </div>
+    <div class="combo-display">
+     COMBO: <span id="combo">0</span>x
+    </div>
+    <div class="timer-display">
+     TIME: <span id="timer">60</span>s
+    </div>
+   </div>
+  </div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { antialias: true });
+    
+    let gameState = {
+      score: 0,
+      combo: 0,
+      gameActive: true,
+      timeLeft: 60
+    };
+
+    // Resize canvas to window
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+
+    // ============ PARTICLES ============
+    class Particle {
+      constructor(x, y, vx, vy, char, color) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.life = 1;
+        this.char = char;
+        this.color = color;
+        this.size = 28;
+        this.rotation = Math.random() * Math.PI * 2;
+        this.rotSpeed = (Math.random() - 0.5) * 0.4;
+      }
+
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.4;
+        this.life -= 0.025;
+        this.rotation += this.rotSpeed;
+      }
+
+      draw(ctx) {
+        if (this.life <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = this.life;
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        ctx.font = `bold ${this.size}px Arial`;
+        ctx.fillStyle = this.color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.char, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    // ============ INGREDIENTS ============
+    class Ingredient {
+      constructor() {
+        this.x = Math.random() * canvas.width;
+        this.y = -50;
+        this.vx = (Math.random() - 0.5) * 6;
+        this.vy = 2 + Math.random() * 4;
+        this.radius = 32;
+        this.rotation = Math.random() * Math.PI * 2;
+        this.rotSpeed = (Math.random() - 0.5) * 0.12;
+        this.sliced = false;
+        
+        const types = [
+          { emoji: '🥕', points: 10, color: '#FF6B35' },
+          { emoji: '🥦', points: 15, color: '#2ECC71' },
+          { emoji: '🫑', points: 12, color: '#F39C12' },
+          { emoji: '🍅', points: 10, color: '#E74C3C' },
+          { emoji: '🥒', points: 8, color: '#27AE60' },
+          { emoji: '🧅', points: 5, color: '#D4A574' },
+          { emoji: '🍗', points: 25, color: '#A0522D' },
+          { emoji: '🍝', points: 20, color: '#D4A574' },
+          { emoji: '🍊', points: 12, color: '#FF8C00' },
+          { emoji: '🥬', points: 8, color: '#3CB371' }
+        ];
+        
+        const t = types[Math.floor(Math.random() * types.length)];
+        Object.assign(this, t);
+      }
+
+      update() {
+        if (!this.sliced) {
+          this.x += this.vx;
+          this.y += this.vy;
+          this.vy += 0.15;
+          this.rotation += this.rotSpeed;
+        }
+      }
+
+      draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        
+        if (!this.sliced) {
+          ctx.font = 'bold 58px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = this.color;
+          ctx.shadowBlur = 20;
+          ctx.fillText(this.emoji, 0, 0);
+        }
+        
+        ctx.restore();
+      }
+
+      isOutOfBounds() {
+        return this.y > canvas.height + 50;
+      }
+    }
+
+    // ============ SLASH EFFECT ============
+    class SlashEffect {
+      constructor(x, y, angle, length) {
+        this.x = x;
+        this.y = y;
+        this.angle = angle;
+        this.length = Math.min(length * 1.2, 150);
+        this.opacity = 1;
+        this.width = 10;
+      }
+
+      update() {
+        this.opacity -= 0.08;
+      }
+
+      draw(ctx) {
+        if (this.opacity <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = this.opacity;
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = this.width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        const endX = this.x + Math.cos(this.angle) * this.length;
+        const endY = this.y + Math.sin(this.angle) * this.length;
+        
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(endX, endY);
+        ctx.shadowColor = '#00FF00';
+        ctx.shadowBlur = 20;
+        ctx.stroke();
+        
+        ctx.restore();
+      }
+    }
+
+    // ============ GAME ARRAYS ============
+    let particles = [];
+    let slashTrail = [];
+    let ingredients = [];
+    let gameTimer = null;
+
+    // ============ AUDIO ============
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    function playSound(type) {
+      if (!audioCtx) initAudio();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      if (type === 'slice') {
+        osc.frequency.setValueAtTime(700, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(250, audioCtx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.08);
+      } else if (type === 'bonus') {
+        osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(1400, audioCtx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.15);
+      }
+    }
+
+    // ============ ACCURATE SLASH DETECTION ============
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+    const sliceThreshold = 1; // Highly responsive
+
+    function distanceToLine(px, py, x1, y1, x2, y2) {
+      const A = px - x1;
+      const B = py - y1;
+      const C = x2 - x1;
+      const D = y2 - y1;
+
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      let param = -1;
+      
+      if (lenSq !== 0) param = dot / lenSq;
+
+      let xx, yy;
+
+      if (param < 0) {
+        xx = x1;
+        yy = y1;
+      } else if (param > 1) {
+        xx = x2;
+        yy = y2;
+      } else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+      }
+
+      const dx = px - xx;
+      const dy = py - yy;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function handleDown(e) {
+      if (!gameState.gameActive) return;
+      e.preventDefault();
+      isDrawing = true;
+      
+      const rect = canvas.getBoundingClientRect();
+      lastX = (e.clientX || e.touches?.[0]?.clientX || 0) - rect.left;
+      lastY = (e.clientY || e.touches?.[0]?.clientY || 0) - rect.top;
+    }
+
+    function handleMove(e) {
+      if (!isDrawing || !gameState.gameActive) return;
+      e.preventDefault();
+
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX || e.touches?.[0]?.clientX || 0) - rect.left;
+      const y = (e.clientY || e.touches?.[0]?.clientY || 0) - rect.top;
+
+      const dx = x - lastX;
+      const dy = y - lastY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist > sliceThreshold) {
+        const angle = Math.atan2(dy, dx);
+        slashTrail.push(new SlashEffect(lastX, lastY, angle, dist));
+
+        // Check all ingredients for collision with this stroke
+        for (let i = ingredients.length - 1; i >= 0; i--) {
+          const ing = ingredients[i];
+          if (!ing.sliced && distanceToLine(ing.x, ing.y, lastX, lastY, x, y) < ing.radius + 12) {
+            ing.sliced = true;
+            playSound('slice');
+            
+            for (let j = 0; j < 18; j++) {
+              const angle = (j / 18) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+              const speed = 7 + Math.random() * 7;
+              particles.push(new Particle(
+                ing.x, ing.y,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed,
+                ing.emoji, ing.color
+              ));
+            }
+
+            let pts = ing.points;
+            if (gameState.combo > 0) pts *= (1 + gameState.combo * 0.2);
+            gameState.score += Math.floor(pts);
+            gameState.combo++;
+
+            if (gameState.combo > 1) playSound('bonus');
+          }
+        }
+
+        lastX = x;
+        lastY = y;
+      }
+    }
+
+    function handleUp(e) {
+      isDrawing = false;
+      gameState.combo = Math.max(0, gameState.combo - 1);
+    }
+
+    canvas.addEventListener('mousedown', handleDown, false);
+    canvas.addEventListener('mousemove', handleMove, false);
+    canvas.addEventListener('mouseup', handleUp, false);
+    canvas.addEventListener('touchstart', handleDown, false);
+    canvas.addEventListener('touchmove', handleMove, false);
+    canvas.addEventListener('touchend', handleUp, false);
+
+    // ============ GAME LOOP ============
+    function update() {
+      if (!gameState.gameActive) return;
+
+      if (Math.random() < 0.1) {
+        ingredients.push(new Ingredient());
+      }
+
+      for (let i = ingredients.length - 1; i >= 0; i--) {
+        ingredients[i].update();
+        if (ingredients[i].isOutOfBounds()) {
+          ingredients.splice(i, 1);
+        }
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update();
+        if (particles[i].life <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+
+      for (let i = slashTrail.length - 1; i >= 0; i--) {
+        slashTrail[i].update();
+        if (slashTrail[i].opacity <= 0) {
+          slashTrail.splice(i, 1);
+        }
+      }
+    }
+
+    function draw() {
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, '#1a472a');
+      grad.addColorStop(1, '#0f2818');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      particles.forEach(p => p.draw(ctx));
+      slashTrail.forEach(s => s.draw(ctx));
+      ingredients.forEach(i => i.draw(ctx));
+
+      document.getElementById('score').textContent = gameState.score;
+      document.getElementById('combo').textContent = Math.max(0, gameState.combo);
+      document.getElementById('timer').textContent = Math.max(0, Math.ceil(gameState.timeLeft));
+    }
+
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ============ TIMER ============
+    function startTimer() {
+      gameState.timeLeft = 60;
+      gameState.gameActive = true;
+      
+      gameTimer = setInterval(() => {
+        gameState.timeLeft--;
+        
+        if (gameState.timeLeft <= 0) {
+          clearInterval(gameTimer);
+          gameState.gameActive = false;
+          
+          setTimeout(() => {
+            showGameOver();
+          }, 1500);
+        }
+      }, 1000);
+    }
+
+    // ============ MODALS ============
+    function showGameOver() {
+      const modal = document.createElement('div');
+      modal.className = 'modal';
+      modal.innerHTML = `
+        <div class="modal-content">
+          <h1>🎮 GAME OVER!</h1>
+          <p style="font-size: 20px; margin: 20px 0;">Final Score: ${gameState.score}</p>
+          <p style="font-size: 18px;">Max Combo: ${gameState.combo}x</p>
+          <button class="btn-primary" onclick="location.reload()" style="margin-top: 20px;">PLAY AGAIN</button>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    function showMenu() {
+      const modal = document.createElement('div');
+      modal.className = 'modal';
+      modal.innerHTML = `
+        <div class="modal-content">
+          <h1 style="font-size: 50px; margin-bottom: 20px;">🔪 CHEF SLASH</h1>
+          <p style="font-size: 20px; margin: 15px 0;">Slash ingredients & build combos!</p>
+          <p style="font-size: 16px; margin: 15px 0; opacity: 0.9;">60 seconds to become a knife master 🏆</p>
+          <button class="btn-primary" onclick="startGame()" style="margin-top: 30px; font-size: 18px; padding: 18px 40px;">START SLICING</button>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    function startGame() {
+      document.querySelector('.modal').remove();
+      gameState.score = 0;
+      gameState.combo = 0;
+      ingredients = [];
+      particles = [];
+      slashTrail = [];
+      startTimer();
+    }
+
+    // ============ INIT ============
+    gameLoop();
+    showMenu();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9cd52b36c7202e8a',t:'MTc3MDk5NDU0OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
